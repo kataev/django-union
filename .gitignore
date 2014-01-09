@@ -1,0 +1,14 @@
+*.pyc
+*.mo
+.idea
+*.db
+*.map
+.DS_Store
+build/
+debian/build-info
+debian/files
+debian/preinst
+debian/*.debhelper.log
+debian/*.debhelper
+debian/*.substvars
+debian/skydns-django-website/
