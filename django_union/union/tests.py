@@ -40,32 +40,26 @@ class UnionTest(TestCase):
         return model
 
     def test_fetch(self):
-        name = 'asd1'
-        model = self.dynamic_model(name)
+        names = ('asd1', 'asd2')
+        for name in names:
+            model = self.dynamic_model(name)
 
-        for x in range(10):
-            m = model(text='filter')
-            m.save()
+            for x in range(10):
+                m = model(text='filter')
+                m.save()
 
-        name1 = 'asd2'
-        model = self.dynamic_model(name1)
-        for x in range(10):
-            m = model(text='filter')
-            m.save()
-        self.assertEqual(model.objects.count(), 10)
-        self.assertTrue(name in self.connection.introspection.table_names())
-        queryset = self.model.objects.filter(text='filter').union(name, name1).all()
+            self.assertEqual(model.objects.count(), 10)
+
+        self.assertTrue(all(name in self.connection.introspection.table_names() for name in names))
+        queryset = self.model.objects.filter(text='filter').union(*names).all()
 
         query = queryset.fetch()
-        i = 0
-        for i, x in enumerate(query):
-            print i, x.text
-
-        self.assertEqual(i, 19)
+        self.assertEqual(len(tuple(r for r in query)), 20)
 
         query = queryset.fetch(cursor=True)
+        self.assertEqual(len(tuple(r for r in query)), 20)
 
-        for i, x in enumerate(query):
-            print i, x[1]
+        queryset = self.model.objects.filter(text='filter').union(*names).all().order_by('text')
 
-        self.assertEqual(i, 19)
+        query = queryset.fetch()
+        self.assertEqual(len(tuple(query)), 20)

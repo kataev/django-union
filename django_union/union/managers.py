@@ -20,11 +20,15 @@ class UnionQuerySet(QuerySet):
     _outer = None
 
     def _sql(self, inner_table):
+        connection = connections[self.db]
+
+        qn = connection.ops.quote_name
+
         table_name = self._inner.model._meta.db_table
+        inner_table_name = '%s AS %s' % (qn(inner_table), qn(table_name))
         alias_data = self._inner.query.alias_map.pop(table_name)
-        inner_table_name = '"%s" AS "%s"' % (inner_table, table_name)
-        self._inner.query.alias_map[table_name] = alias_data._replace(table_name=inner_table_name,
-                                                                      rhs_alias=inner_table_name)
+        alias_data = alias_data._replace(table_name=inner_table_name, rhs_alias=inner_table_name)
+        self._inner.query.alias_map[table_name] = alias_data
         return self._inner.query.sql_with_params()
 
     def _union_as_sql(self):
@@ -70,7 +74,6 @@ class UnionQuerySet(QuerySet):
             return self.model.objects.raw(union_sql, params)
         else:
             cursor = connection.cursor()
-            print union_sql, params
             cursor.execute(union_sql, params)
             return cursor
 
