@@ -1,3 +1,5 @@
+import itertools
+
 from django.db import models
 from django.db.models.query import QuerySet
 from django.db.models.options import Options
@@ -62,12 +64,14 @@ class UnionQuerySet(QuerySet):
             union_sql = ' UNION ALL '.join(sql)
         else:
             union_sql = ' UNION ALL '.join('(%s)' % s for s in sql)
+        params = tuple(itertools.chain.from_iterable(params))
 
         if not cursor:
-            return self.model.objects.raw(union_sql, *params)
+            return self.model.objects.raw(union_sql, params)
         else:
             cursor = connection.cursor()
-            cursor.execute(union_sql, *params)
+            print union_sql, params
+            cursor.execute(union_sql, params)
             return cursor
 
     def using(self, alias):
