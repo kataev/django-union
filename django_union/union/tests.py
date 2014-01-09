@@ -1,7 +1,18 @@
 from django.test import TestCase
 from django.db import connections
+from django.db import models
 
-from .models import TestModel
+from .managers import UnionManager
+
+
+class TestModel(models.Model):
+    text = models.CharField(max_length=40)
+
+    objects = UnionManager()
+
+    class Meta(object):
+        managed = False
+        app_label = 'union'
 
 
 class UnionTest(TestCase):
@@ -12,7 +23,6 @@ class UnionTest(TestCase):
         queryset = self.model.objects.filter(text='filter').union(2013, 2014)
         self.assertIsNotNone(queryset._inner)
         self.assertIsNotNone(queryset._tables)
-        # queryset.fetch()
 
     def dynamic_model(self, name='asd'):
         model = TestModel.objects.get_model(name, app_label='fake_app_label')

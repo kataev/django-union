@@ -6,7 +6,10 @@ from django.db import connections
 
 
 class UnionError(Exception):
-    pass
+    message = None
+
+    def __init__(self, message):
+        self.message = message
 
 
 class UnionQuerySet(QuerySet):
@@ -18,7 +21,8 @@ class UnionQuerySet(QuerySet):
         table_name = self._inner.model._meta.db_table
         alias_data = self._inner.query.alias_map.pop(table_name)
         inner_table_name = '"%s" AS "%s"' % (inner_table, table_name)
-        self._inner.query.alias_map[table_name] = alias_data._replace(table_name=inner_table_name, rhs_alias=inner_table_name)
+        self._inner.query.alias_map[table_name] = alias_data._replace(table_name=inner_table_name,
+                                                                      rhs_alias=inner_table_name)
         return self._inner.query.sql_with_params()
 
     def _union_as_sql(self):
@@ -32,7 +36,7 @@ class UnionQuerySet(QuerySet):
         if len(tables) == 0:
             tables = kwargs.get('tables')
             if not tables:
-                raise UnionError()
+                raise UnionError('No tables selected')
             if callable(tables):
                 pass
 
@@ -49,7 +53,7 @@ class UnionQuerySet(QuerySet):
 
     def fetch(self, cursor=False):
         if self._inner is None:
-            raise UnionError()
+            raise UnionError('Fetch without union')
         connection = connections[self.db]
 
         sql, params = zip(*self._union_as_sql())
@@ -65,7 +69,6 @@ class UnionQuerySet(QuerySet):
             cursor = connection.cursor()
             cursor.execute(union_sql, *params)
             return cursor
-
 
     def using(self, alias):
         return super(UnionQuerySet, self).using(alias)
