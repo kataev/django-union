@@ -13,6 +13,7 @@ class TestModel(models.Model):
     class Meta(object):
         managed = False
         app_label = 'union'
+        ordering = ('text',)
 
 
 class UnionTest(TestCase):
@@ -22,7 +23,7 @@ class UnionTest(TestCase):
 
 
     def test_simple(self):
-        queryset = self.model.objects.filter(text='filter').union(2013, 2014)
+        queryset = self.model.objects.filter(text='filter').split(2013, 2014)
         self.assertIsNotNone(queryset._inner)
         self.assertIsNotNone(queryset._tables)
 
@@ -51,15 +52,19 @@ class UnionTest(TestCase):
             self.assertEqual(model.objects.count(), 10)
 
         self.assertTrue(all(name in self.connection.introspection.table_names() for name in names))
-        queryset = self.model.objects.filter(text='filter').union(*names).all()
+        queryset = self.model.objects.filter(text='filter').split(*names).filter(id=1)
 
-        query = queryset.fetch()
+        # query = queryset.union_all()
+        # self.assertEqual(len(tuple(r for r in query)), 20)
+        queryset = queryset.annotate(asd=models.Count('id'))
+        query = queryset.union_all(cursor=True)
+        query = tuple(query)
         self.assertEqual(len(tuple(r for r in query)), 20)
-
-        query = queryset.fetch(cursor=True)
-        self.assertEqual(len(tuple(r for r in query)), 20)
-
-        queryset = self.model.objects.filter(text='filter').union(*names).all().order_by('text')
-
-        query = queryset.fetch()
-        self.assertEqual(len(tuple(query)), 20)
+        print query
+        # queryset = self.model.objects.filter(text='filter').split(*names).all()
+        #
+        # query = queryset.union_all()
+        # self.assertEqual(len(tuple(query)), 20)
+        #
+        # query = queryset.union()
+        # self.assertEqual(len(tuple(query)), 20)

@@ -4,6 +4,7 @@ from django.db import models
 from django.db.models.query import QuerySet
 from django.db.models.options import Options
 from django.core.management import color
+from django.utils.crypto import get_random_string
 from django.db import connections
 
 
@@ -14,28 +15,33 @@ class UnionError(Exception):
         self.message = message
 
 
+
+
 class UnionQuerySet(QuerySet):
     _tables = ()
     _inner = None
     _outer = None
+    qn = None
+
+    def _clone(self, klass=None, setup=False, **kwargs):
+        clone = super(UnionQuerySet, self)._clone(klass, setup, **kwargs)
+        clone._inner = self._inner
+        clone._tables = self._tables
+        clone._outer = self._outer
+        return clone
 
     def _sql(self, inner_table):
-        connection = connections[self.db]
-
-        qn = connection.ops.quote_name
-
         table_name = self._inner.model._meta.db_table
-        inner_table_name = '%s AS %s' % (qn(inner_table), qn(table_name))
+        inner_table_name = '%s AS %s' % (self.qn(inner_table), self.qn(table_name))
         alias_data = self._inner.query.alias_map.pop(table_name)
         alias_data = alias_data._replace(table_name=inner_table_name, rhs_alias=inner_table_name)
         self._inner.query.alias_map[table_name] = alias_data
         return self._inner.query.sql_with_params()
 
     def _union_as_sql(self):
-        for inner_table_name in self._tables:
-            yield self._sql(inner_table_name)
+        return [self._sql(inner_table_name) for inner_table_name in self._tables]
 
-    def union(self, *tables, **kwargs):
+    def split(self, *tables, **kwargs):
         tables_coerce = kwargs.get('coerce', str)
         tables_filter = kwargs.get('filter', None)
         table_sort = kwargs.get('sorted', list)
@@ -47,35 +53,50 @@ class UnionQuerySet(QuerySet):
                 pass
 
         self._tables = table_sort(filter(tables_filter, map(tables_coerce, tables)))
-        self._inner = self
-        return self._clone()
+        self._inner = self.order_by()
+        return self.all()
 
-    def _clone(self, klass=None, setup=False, **kwargs):
-        clone = super(UnionQuerySet, self)._clone(klass, setup, **kwargs)
-        clone._inner = self._inner
-        clone._tables = self._tables
-        clone._outer = self._outer
-        return clone
-
-    def fetch(self, cursor=False):
+    def _fetch(self, operand, cursor=False):
         if self._inner is None:
             raise UnionError('Fetch without union')
         connection = connections[self.db]
+        self.qn = connection.ops.quote_name
 
-        sql, params = zip(*self._union_as_sql())
+        sql, inner_params = zip(*self._union_as_sql())
+
+        separator = ' %s ' % operand
 
         if connection.vendor == 'sqlite':
-            union_sql = ' UNION ALL '.join(sql)
+            inner_sql = separator.join(sql)
         else:
-            union_sql = ' UNION ALL '.join('(%s)' % s for s in sql)
-        params = tuple(itertools.chain.from_iterable(params))
+            inner_sql = separator.join('(%s)' % s for s in sql)
+        inner_params = tuple(itertools.chain.from_iterable(inner_params))
+
+        random_table_name = get_random_string(6)
+        final_sql, params = self._sql(random_table_name)
+
+        select = '(%s)'
+
+        random_table_name = self.qn(random_table_name)
+        final_sql = final_sql.replace(random_table_name, select % inner_sql)
+
+        params = list(params)
+        params.extend(inner_params)
+
+        print final_sql
 
         if not cursor:
-            return self.model.objects.raw(union_sql, params)
+            return self.model.objects.raw(final_sql, params)
         else:
             cursor = connection.cursor()
-            cursor.execute(union_sql, params)
+            cursor.execute(final_sql, params)
             return cursor
+
+    def union(self, **kwargs):
+        return self._fetch(operand='UNION', **kwargs)
+
+    def union_all(self, **kwargs):
+        return self._fetch(operand='UNION ALL', **kwargs)
 
     def using(self, alias):
         return super(UnionQuerySet, self).using(alias)
