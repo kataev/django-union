@@ -45,9 +45,10 @@ class UnionQuerySet(QuerySet):
     def _sql(self, inner_table):
         table_name = self._inner.model._meta.db_table
         inner_table_name = '%s AS %s' % (self.qn(inner_table), self.qn(table_name))
-        alias_data = self._inner.query.alias_map.pop(table_name)
-        alias_data = alias_data._replace(table_name=inner_table_name, rhs_alias=inner_table_name)
-        self._inner.query.alias_map[table_name] = alias_data
+        if table_name in self._inner.query.alias_map:
+            alias_data = self._inner.query.alias_map.pop(table_name)
+            alias_data = alias_data._replace(table_name=inner_table_name, rhs_alias=inner_table_name)
+            self._inner.query.alias_map[table_name] = alias_data
         return self._inner.query.sql_with_params()
 
     def _union_as_sql(self):
@@ -95,8 +96,6 @@ class UnionQuerySet(QuerySet):
         params = list(params)
         params.extend(inner_params)
 
-        print final_sql
-
         if not cursor:
             return self.model.objects.raw(final_sql, params)
         else:
@@ -126,7 +125,7 @@ class UnionManager(models.Manager):
     def get_model(self, name, module='', **kwargs):
         kwargs.setdefault('db_table', name)
         meta = type('Meta', (Options,), kwargs)
-        attrs = {'__module__': module, 'Meta': meta, 'objects': self}
+        attrs = {'__module__': module, 'Meta': meta, 'objects': UnionManager()}
         attrs.update([(f.name, f) for f in self.model._meta.fields])
         return type(name, (models.Model,), attrs)
 
