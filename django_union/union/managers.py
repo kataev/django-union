@@ -55,16 +55,20 @@ class UnionQuerySet(QuerySet):
     def _union_as_sql(self):
         return [self._sql(inner_table_name) for inner_table_name in self._tables]
 
+    cource = str
+    filter_func = None
+    sorting = list
+
     def split(self, *tables, **kwargs):
-        tables_coerce = kwargs.get('coerce', str)
-        tables_filter = kwargs.get('filter', None)
-        table_sort = kwargs.get('sorted', list)
+        tables_coerce = kwargs.get('coerce', self.cource)
+        tables_filter = kwargs.get('filter', self.filter_func)
+        table_sort = kwargs.get('sorting', self.sorting)
         if len(tables) == 0:
             tables = kwargs.get('tables')
             if not tables:
                 raise UnionError('No tables selected')
             if callable(tables):
-                pass
+                tables = tables()
 
         self._tables = table_sort(filter(tables_filter, map(tables_coerce, tables)))
         self._inner = self.order_by()
