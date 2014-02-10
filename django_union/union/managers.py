@@ -17,6 +17,7 @@ class UnionError(Exception):
 
 column_regex = re.compile('["\'][A-Za-z0-9]*[\'"].["\']([A-Za-z0-9]*)[\'"]')
 
+
 class UnionRawQuerySet(RawQuerySet):
     @property
     def columns(self):

@@ -1,3 +1,5 @@
+import datetime
+
 from django.test import TestCase
 from django.db import connections
 from django.db import models
@@ -47,7 +49,7 @@ class UnionTest(TestCase):
                 m.save()
 
             self.assertEqual(model.objects.count(), 10)
-            queryset = model.objects.filter(text='filter').split(2013, 2014)
+            queryset = model.objects.filter(text='filter').split(*self.names)
             self.assertIsNotNone(queryset._inner)
             self.assertIsNotNone(queryset._tables)
 
@@ -96,3 +98,27 @@ class UnionNonCursorTest(UnionTest):
 
         query = queryset.union()
         self.assertEqual(len(tuple(query)), 20)
+
+
+class UnionDateTest(UnionTest):
+    dates = [datetime.date(2013, 01, 01), datetime.date(2013, 01, 02)]
+    names = ['ollo_'+d.isoformat() for d in dates]
+
+    def prepare_models(self):
+        for name in self.names:
+            model = self.dynamic_model(name)
+            self.models.append(model)
+
+            for x in range(10):
+                m = model(text=name)
+                m.save()
+
+            self.assertEqual(model.objects.count(), 10)
+            queryset = model.objects.filter(text='filter').split(*self.names)
+            self.assertIsNotNone(queryset._inner)
+            self.assertIsNotNone(queryset._tables)
+
+        self.assertTrue(all(name in self.connection.introspection.table_names() for name in self.names))
+
+    def test_nothing(self):
+        pass
