@@ -80,8 +80,7 @@ class UnionNonCursorTest(UnionTest):
         sql, params = model.objects.all().query.sql_with_params()
 
         for x in model.objects.raw(sql, params):
-            pass
-            # print x.text
+            self.assertEqual(x.text, x._meta.db_table)
 
         for name in self.names:
             queryset = model.objects.filter(text=name).split(*self.names).all()
