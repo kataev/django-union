@@ -102,7 +102,7 @@ class UnionNonCursorTest(UnionTest):
 
 class UnionDateTest(UnionTest):
     dates = [datetime.date(2013, 01, 01), datetime.date(2013, 01, 02)]
-    names = ['ollo_'+d.isoformat() for d in dates]
+    names = ['ollo_' + d.isoformat() for d in dates]
 
     def prepare_models(self):
         for name in self.names:
@@ -121,4 +121,10 @@ class UnionDateTest(UnionTest):
         self.assertTrue(all(name in self.connection.introspection.table_names() for name in self.names))
 
     def test_nothing(self):
-        pass
+        def c(value):
+            if isinstance(value, datetime.date):
+                return 'ollo_' + value.isoformat()
+            return value
+
+        queryset = TestModel.objects.all().split(*self.dates, coerce=c).all().union_all()
+        self.assertEqual(len(tuple(queryset)), 20)
