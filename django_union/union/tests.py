@@ -18,14 +18,16 @@ class TestModel(models.Model):
 
 class UnionTest(TestCase):
     def setUp(self):
-        self.model = TestModel
         self.connection = connections[TestModel.objects.db]
+        self.prepare_models()
 
+    def prepare_models(self):
+        pass
 
-    def test_simple(self):
-        queryset = self.model.objects.filter(text='filter').split(2013, 2014)
-        self.assertIsNotNone(queryset._inner)
-        self.assertIsNotNone(queryset._tables)
+    # def test_simple(self):
+    #     queryset = self.model.objects.filter(text='filter').split(2013, 2014)
+    #     self.assertIsNotNone(queryset._inner)
+    #     self.assertIsNotNone(queryset._tables)
 
     def dynamic_model(self, name='asd'):
         model = TestModel.objects.get_model(name, app_label='fake_app_label')
@@ -39,6 +41,22 @@ class UnionTest(TestCase):
         new_length = len(self.connection.introspection.table_names())
         self.assertEqual(old_length + 1, new_length)
         return model
+
+
+class TestCursor(UnionTest):
+    def test_olo(self):
+        model = self.dynamic_model('asd')
+
+        for x in range(10):
+            m = model(text='filter')
+            m.save()
+
+        sql, params = model.objects.all().query.sql_with_params()
+
+        print sql, params
+
+        for x in model.objects.raw(sql, params):
+            print x.text
 
     def test_fetch(self):
         names = ('asd1', 'asd2')
@@ -60,11 +78,45 @@ class UnionTest(TestCase):
         query = queryset.union_all(cursor=True)
         query = tuple(query)
         self.assertEqual(len(tuple(r for r in query)), 20)
-        print query
-        # queryset = self.model.objects.filter(text='filter').split(*names).all()
-        #
-        # query = queryset.union_all()
-        # self.assertEqual(len(tuple(query)), 20)
-        #
-        # query = queryset.union()
-        # self.assertEqual(len(tuple(query)), 20)
+        # print query
+        queryset = self.model.objects.filter(text='filter').split(*names).all()
+
+
+class UnionNonCursorTest(UnionTest):
+    models = []
+    names = ('asd1', 'asd2')
+
+    def prepare_models(self):
+        for name in self.names:
+            model = self.dynamic_model(name)
+            self.models.append(model)
+
+            for x in range(10):
+                m = model(text=name)
+                m.save()
+
+            self.assertEqual(model.objects.count(), 10)
+        print [name in self.connection.introspection.table_names() for name in self.names]
+        self.assertTrue(all(name in self.connection.introspection.table_names() for name in self.names))
+
+    def test_non_cursor(self):
+        model = self.models[0]
+
+        sql, params = model.objects.all().query.sql_with_params()
+
+        for x in model.objects.raw(sql, params):
+            print x.text
+        for name in self.names:
+            queryset = model.objects.filter(text=name).split(*self.names).all()
+            query = queryset.union_all()
+            self.assertEqual(len(tuple(query)), 10)
+
+            query = queryset.union()
+            self.assertEqual(len(tuple(query)), 10)
+
+        queryset = model.objects.all().split(*self.names).all()
+        query = queryset.union_all()
+        self.assertEqual(len(tuple(query)), 20)
+
+        query = queryset.union()
+        self.assertEqual(len(tuple(query)), 20)

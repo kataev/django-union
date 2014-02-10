@@ -1,7 +1,8 @@
+import re
 import itertools
 
 from django.db import models
-from django.db.models.query import QuerySet
+from django.db.models.query import QuerySet, RawQuerySet
 from django.db.models.options import Options
 from django.core.management import color
 from django.utils.crypto import get_random_string
@@ -14,8 +15,19 @@ class UnionError(Exception):
     def __init__(self, message):
         self.message = message
 
+column_regex = re.compile('["\'][A-Za-z0-9]*[\'"].["\']([A-Za-z0-9]*)[\'"]')
 
-
+class UnionRawQuerySet(RawQuerySet):
+    @property
+    def columns(self):
+        columns = super(UnionRawQuerySet, self).columns
+        def f(col):
+            res = column_regex.findall(col)
+            if res:
+                return res[0]
+            else:
+                return col
+        return map(f, columns)
 
 class UnionQuerySet(QuerySet):
     _tables = ()
@@ -114,7 +126,7 @@ class UnionManager(models.Manager):
     def get_model(self, name, module='', **kwargs):
         kwargs.setdefault('db_table', name)
         meta = type('Meta', (Options,), kwargs)
-        attrs = {'__module__': module, 'Meta': meta}
+        attrs = {'__module__': module, 'Meta': meta, 'objects': self}
         attrs.update([(f.name, f) for f in self.model._meta.fields])
         return type(name, (models.Model,), attrs)
 
@@ -122,3 +134,6 @@ class UnionManager(models.Manager):
         style = color.no_style()
         connection = connections[self.db]
         return connection.creation.sql_create_model(model, style)
+
+    def raw(self, raw_query, params=None, *args, **kwargs):
+        return UnionRawQuerySet(raw_query=raw_query, model=self.model, params=params, using=self._db, *args, **kwargs)
