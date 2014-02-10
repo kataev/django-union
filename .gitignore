@@ -12,3 +12,4 @@ debian/*.debhelper.log
 debian/*.debhelper
 debian/*.substvars
 debian/skydns-django-website/
+django_union/db.sqlite3
