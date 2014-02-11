@@ -1,5 +1,7 @@
+# coding: utf-8
 import re
-import copy
+
+from contextlib import contextmanager
 
 from django.db import models
 from django.db.models.query import QuerySet, RawQuerySet
@@ -9,6 +11,15 @@ from django.utils.crypto import get_random_string
 from django.db import connections
 
 
+@contextmanager
+def patch_db_table(query, name):
+    meta = query.get_meta()
+    db_table = meta.db_table
+    meta.db_table = name
+    yield
+    meta.db_table = db_table
+
+
 class UnionError(Exception):
     message = None
 
@@ -16,7 +27,7 @@ class UnionError(Exception):
         self.message = message
 
 
-column_regex = re.compile('["\'][A-Za-z0-9]*[\'"].["\']([A-Za-z0-9]*)[\'"]')
+column_regex = re.compile('^"\w"."(\w)"')
 
 
 class UnionRawQuerySet(RawQuerySet):
@@ -25,9 +36,12 @@ class UnionRawQuerySet(RawQuerySet):
         columns = super(UnionRawQuerySet, self).columns
 
         def f(col):
-            res = column_regex.findall(col)
-            if res:
-                return res[0]
+            if '.' in col:
+                return col.split('.')[1].strip('"')
+            # res = column_regex.findall(col)
+            # print res
+            # if res:
+            #     return res[0]
             else:
                 return col
 
@@ -36,6 +50,7 @@ class UnionRawQuerySet(RawQuerySet):
 
 def format_sql_print(sql):
     import sqlparse
+
     print
     print sqlparse.format(sql, reindent=True, keyword_case='upper')
 
@@ -44,23 +59,27 @@ class UnionQuerySet(QuerySet):
     _tables = ()
     _inner = None
     _outer = None
-    _qn = None
+
     _wrappers = {'sqlite': '{}'}
 
     cource = str
     filter_func = None
     sorting = list
 
+    @property
+    def _qn(self):
+        return connections[self.db].ops.quote_name
+
     def split(self, *tables, **kwargs):
         tables_coerce = kwargs.get('coerce', self.cource)
         tables_filter = kwargs.get('filter', self.filter_func)
         table_sort = kwargs.get('sorting', self.sorting)
+        if callable(tables):
+            tables = tables()
         if len(tables) == 0:
             tables = kwargs.get('tables')
-            if not tables:
-                raise UnionError('No tables selected')
-            if callable(tables):
-                tables = tables()
+        if not tables:
+            raise UnionError('No tables selected')
 
         self._tables = table_sort(filter(tables_filter, map(tables_coerce, tables)))
         self._inner = self.order_by()
@@ -73,20 +92,42 @@ class UnionQuerySet(QuerySet):
         clone._outer = self._outer
         return clone
 
-    def _sql(self, inner_table):
-        # self._inner.query = copy.deepcopy(self._inner.query)
-        self._inner.query.join((None, inner_table, None))
-        print self._inner.query.join_map
-        m = self._inner.query.join_map[(None, inner_table, None)]
-        self._inner.query.join_map = {(None, inner_table, None):m}
-        return self._inner.query.sql_with_params()
+    def _sql(self, table):
+        '''
+         Нам для внешнего запроса надо сделать alias
+         " from 'randomstring' as 'true name' "
+         чтобы потом заменить рандомную строку на наш запрос
+         т.е в алиасе должно быть нормальное имя а в настоящем рандом строка.
+         '''
+        query = self.query
+        if table in self._tables:
+            query = self._inner.query
+        else:
+            print table
+            table_name = query.get_meta().db_table
+            alias_data = query.alias_map.pop(table_name)
+            alias_data = alias_data._replace(table_name=table_name)  #, rhs_alias=table_name)
+            query.alias_map[table_name] = alias_data
+            # print query.alias_map
+            # name, alias, join_type, lhs, join_cols, _, join_field = self.query.alias_map[alias]
+        # query =
+        # print table
+        # print query.tables, query.table_map, query.alias_map
+        # print query.__dict__
+        # print query.get_compiler('default').__dict__
+
+        if table in self._tables:
+            query.tables = []
+            with patch_db_table(query, table):
+                return query.sql_with_params()
+        else:
+            return query.sql_with_params()
 
     def _union_as_sql(self, operand):
         connection = connections[self.db]
         separator = ' %s ' % operand
 
         sql, params = zip(*(self._sql(inner_table_name) for inner_table_name in self._tables))
-        # import ipdb; ipdb.set_trace()
         wrapper = self._wrappers.get(connection.vendor, '({})')
 
         inner_sql = separator.join(wrapper.format(s) for s in sql)
@@ -97,36 +138,32 @@ class UnionQuerySet(QuerySet):
         if self._inner is None:
             raise UnionError('Fetch without union')
 
-        connection = connections[self.db]
-        self._qn = connection.ops.quote_name
+        random_table_name = get_random_string(6)
 
         inner_sql, inner_params = self._union_as_sql(operand)
-
-        random_table_name = get_random_string(6)
-        final_sql, params = self._sql(random_table_name)
-
-        select = '(%s)'
-
-        random_table_name = self._qn(random_table_name)
-        final_sql = final_sql.replace(random_table_name, select % inner_sql)
+        outer_sql, outer_params = self._sql(random_table_name)
+        # format_sql_print(outer_sql)
+        final_sql = outer_sql.replace(self._qn(random_table_name) + ' ',
+                                      '(%s) AS ' % inner_sql)
+        final_params = tuple(outer_params + inner_params)
 
         format_sql_print(final_sql)
 
-        params = list(params)
-        params.extend(inner_params)
-
-        if not cursor:
-            return self.model.objects.raw(final_sql, params)
-        else:
-            cursor = connection.cursor()
-            cursor.execute(final_sql, params)
+        if cursor:
+            cursor = connections[self.db].cursor()
+            cursor.execute(final_sql, final_params)
             return cursor
+
+        return self.model.objects.raw(final_sql, final_params)
+
 
     def union(self, **kwargs):
         return self._fetch(operand='UNION', **kwargs)
 
+
     def union_all(self, **kwargs):
         return self._fetch(operand='UNION ALL', **kwargs)
+
 
     def using(self, alias):
         return super(UnionQuerySet, self).using(alias)
